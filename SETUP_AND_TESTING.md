@@ -1,7 +1,7 @@
 # VASD Display – Setup & Testing Guide
 
 Raspberry Pi Pico firmware for a **Vehicle Actuated Speed Display (VASD)** LED matrix panel.  
-Supports **two communication paths** and **two command formats**.
+Commands follow the **VSDS PDF protocol** (Artistic Infratech). Same commands work on **W5500 Ethernet** and **USR-K5 serial**.
 
 ---
 
@@ -10,13 +10,12 @@ Supports **two communication paths** and **two command formats**.
 | Feature | Description |
 |---------|-------------|
 | LED panel | 4×4 matrix of 32×32 RGB panels (128×128 pixels) |
-| W5500 Ethernet | TCP server – receive commands over network |
-| USR-K5 UART | Serial1 – receive same commands over serial |
-| VSDS PDF protocol | Pipe format `\|T\|...\|` / `\|C\|...\|` (Artistic Infratech) |
-| Legacy protocol | Comma format `SPEED,...` / `TEXT,...` etc. |
-| Speed screen | Large speed number + OVERSPEED / UNDERSPEED label |
+| W5500 Ethernet | TCP server – send commands over network |
+| USR-K5 UART | Serial1 (GPIO 20/21) – same commands over serial |
+| Speed display | Large speed number + **OVERSPEED** / **UNDERSPEED** label |
+| IP & port | Stored in EEPROM – survives power off |
 
-On boot, the **USB Serial monitor** (115200 baud) prints:
+On boot, **USB Serial monitor** (115200 baud) prints:
 
 ```
 PORT:23
@@ -24,13 +23,42 @@ My IP:192.168.0.7
 USR-K5 UART on TX:20 RX:21
 ```
 
-GPIO **22** heartbeat LED blinks ~2× per second when the firmware is running.
+GPIO **22** heartbeat LED blinks when firmware is running.
 
 ---
 
-## 2. Hardware Wiring
+## 2. Supported Commands (Summary)
 
-### 2.1 W5500 → Raspberry Pi Pico
+| What you want | Command format | Reply |
+|---------------|----------------|-------|
+| Show speed | `\|T\|0-0\|<speed>\|<color>\|7\|1\|0\|` | `OK` |
+| Clear speed screen | `\|C\|0-0\|<speed>\|<color>\|7\|1\|0\|` | `OK` |
+| Clear full display | `\|C\|0-0\|CLEAR\|0\|0\|1\|0\|` | `OK` |
+| Change IP | `SET,<a>,<b>,<c>,<d>` | `OK` then reboot |
+| Change TCP port | `SETS,<port>` | `OK` then reboot |
+
+**Always press Enter** after each command (`\n` or `\r\n`).
+
+Works on **both** W5500 (TCP) and USR-K5 (115200 serial).
+
+---
+
+## 3. Default Network Settings
+
+Change these in `config.h` **before first upload**, or use `SET` / `SETS` commands after upload (saved to EEPROM).
+
+| Setting | Default | Where to change |
+|---------|---------|-----------------|
+| IP address | `192.168.0.7` | `config.h` → `ip_array[]` or command `SET,...` |
+| TCP port | `23` | `config.h` → `SERVER_PORT` or command `SETS,...` |
+| UART baud | `115200` | `config.h` → `USR_K5_BAUDRATE` |
+| Subnet | PC must be `192.168.0.x` | Your PC network settings |
+
+---
+
+## 4. Hardware Wiring
+
+### 4.1 W5500 → Raspberry Pi Pico
 
 | W5500 pin | Pico GPIO |
 |-----------|-----------|
@@ -42,317 +70,235 @@ GPIO **22** heartbeat LED blinks ~2× per second when the firmware is running.
 | 3.3V      | 3V3       |
 | GND       | GND       |
 
-### 2.2 USR-K5 → Raspberry Pi Pico
+### 4.2 USR-K5 → Raspberry Pi Pico
 
 | USR-K5 | Pico | Notes |
 |--------|------|-------|
-| RX     | **GPIO 20** (TX1) | Pico transmits → K5 receives |
-| TX     | **GPIO 21** (RX1) | K5 transmits → Pico receives |
+| RX     | **GPIO 20** (TX1) | Pico TX → K5 RX |
+| TX     | **GPIO 21** (RX1) | K5 TX → Pico RX |
 | GND    | GND | Common ground required |
 
 **Serial settings:** 115200 baud, 8N1
 
-### 2.3 Other Pico pins
+### 4.3 Other Pico pins
 
-| Function      | GPIO |
-|---------------|------|
-| Heartbeat LED | 22   |
-| Hard reset btn| 27   (INPUT_PULLUP – hold LOW 10 s to factory reset) |
-| LED panel     | See `config.h` (GPIO 0–12) |
-
-### 2.4 Network (default)
-
-| Setting | Value |
-|---------|-------|
-| IP address | **192.168.0.7** |
-| TCP port   | **23** |
-| Subnet     | PC must be on same network (e.g. 192.168.0.x) |
+| Function       | GPIO |
+|----------------|------|
+| Heartbeat LED  | 22   |
+| Hard reset btn | 27 (hold LOW 10 s → factory reset) |
+| LED panel      | See `config.h` (GPIO 0–12) |
 
 ---
 
-## 3. Software Setup (Arduino IDE)
+## 5. Software Setup (Arduino IDE)
 
 1. Install **Arduino IDE** (or Arduino CLI).
 2. Add board package: **Raspberry Pi Pico / RP2040** (Earle Philhower core).
 3. Select board: **Raspberry Pi Pico**.
-4. Required libraries (install via Library Manager if missing):
-   - **Ethernet** (included with RP2040 core)
-   - **SPI**, **EEPROM**, **HardwareSerial**
-   - **DMD_RGB** / **DMD_STM32** (LED panel library used by this project)
-5. Open `vasd.ino` from this folder.
-6. Upload to Pico (BOOTSEL + USB if needed).
-7. Open **Serial Monitor** at **115200** to confirm IP and port.
+4. Required libraries:
+   - **Ethernet**, **SPI**, **EEPROM**, **HardwareSerial** (RP2040 core)
+   - **DMD_RGB** / **DMD_STM32** (LED panel)
+5. Open `vasd.ino` and upload.
+6. Open **Serial Monitor** @ **115200** – confirm IP and port.
 
 ---
 
-## 4. USR-K5 Module Setup
+## 6. How to Connect
 
-Configure the USR-K5 (web UI or AT commands) so it matches the Pico:
+### 6.1 W5500 – Ethernet TCP
 
-| Parameter | Value |
-|-----------|-------|
-| Baud rate | **115200** |
-| Data bits | 8 |
-| Parity    | None |
-| Stop bits | 1 |
+**PuTTY:** Raw/Telnet → Host `192.168.0.7` → Port `23` → type command → Enter
 
-**Option A – Direct serial test (easiest)**  
-Connect PC USB‑serial adapter to USR-K5 serial port (or Pico UART pins) and send commands from a terminal.
-
-**Option B – Network through USR-K5**  
-Set USR-K5 to **TCP Server** or **transparent transmission** mode so data received on its Ethernet port is forwarded to UART (GPIO 20/21). Send commands from a TCP client to the K5 IP; they arrive on Pico Serial1.
-
----
-
-## 5. How to Connect & Send Commands
-
-### 5.1 Test via W5500 (Ethernet TCP)
-
-**Windows – PuTTY**
-
-1. Connection type: **Raw** or **Telnet**
-2. Host: `192.168.0.7`
-3. Port: `23`
-4. Open connection
-5. Type a command and press **Enter**
-
-**Windows – PowerShell**
+**PowerShell:**
 
 ```powershell
 $client = New-Object System.Net.Sockets.TcpClient("192.168.0.7", 23)
 $stream = $client.GetStream()
 $writer = New-Object System.IO.StreamWriter($stream)
 $reader = New-Object System.IO.StreamReader($stream)
-$writer.WriteLine("SPEED,65,0")
+$writer.WriteLine("|T|0-0|65|1|7|1|0|")
 $writer.Flush()
 Start-Sleep -Milliseconds 500
 $reader.ReadToEnd()
 $client.Close()
 ```
 
-**Linux / Mac**
+**Linux / Mac:**
 
 ```bash
 nc 192.168.0.7 23
 # then type:
-SPEED,65,0
+|T|0-0|65|1|7|1|0|
 ```
 
-### 5.2 Test via USR-K5 (Serial)
+### 6.2 USR-K5 – Serial
 
-Use **PuTTY**, **Tera Term**, or **Arduino Serial Monitor** (if wired to USB-serial on UART):
+Use **PuTTY**, **Tera Term**, or USB-serial on Pico UART pins:
 
-- Port: your COM port  
-- Baud: **115200**  
-- Send command + **Enter** (newline)
+- Baud: **115200**
+- Send command + **Enter**
+
+Configure USR-K5 to **115200, 8N1**. For network-through-K5, set K5 to transparent/TCP mode so data reaches Pico Serial1.
 
 ---
 
-## 6. Command Formats Overview
+## 7. TEXT Command – Show Speed
 
-The firmware auto-detects the format:
+Per PDF, **`|T|` = entering speed** (not free text). Shows full speed screen: headline, large number, OVERSPEED/UNDERSPEED.
 
-- Starts with `|` → **VSDS PDF protocol**
-- Contains `,` → **Legacy comma protocol**
-
-**Always end commands with Enter** (`\n` or `\r\n`).
-
----
-
-## 7. SPEED Commands (Legacy – Comma Format)
-
-Speed display uses the **legacy protocol only** (not in PDF pipe format).
-
-### Syntax
+### Format
 
 ```
-SPEED,<speed>,<limit>
+|T|0-0|<speed>|<color>|7|1|0|
 ```
 
-| Field | Meaning |
-|-------|---------|
-| speed | Vehicle speed (0–999 km/h) |
-| limit | `0` = **OVERSPEED** (red), `1` = **UNDERSPEED** (green) |
+### Fields – what to change
 
-### Examples
+| Field | Fixed value | You change | Example |
+|-------|-------------|------------|---------|
+| `T` | Text/speed command | No | `T` |
+| `0-0` | Position (PDF fixed) | No | `0-0` |
+| `<speed>` | Speed value | **Yes** – 0–999 km/h | `65` |
+| `<color>` | Display color | **Yes** – 1 to 7 (see table) | `1` |
+| `7` | Font size (PDF fixed) | No | `7` |
+| `1` | Text effect (PDF fixed) | No | `1` |
+| `0` | Reserved (PDF fixed) | No | `0` |
 
-| Command | Result |
-|---------|--------|
-| `SPEED,45,0` | Shows **45** in red + **OVERSPEED** |
-| `SPEED,45,1` | Shows **45** in green + **UNDERSPEED** |
-| `SPEED,120,0` | Shows **120** in red + **OVERSPEED** |
-| `SPEED,8,1` | Shows **8** in green + **UNDERSPEED** |
+### Color table – change `<color>` to get different colours
 
-### Reply
+| Code | Color | Label shown |
+|------|-------|-------------|
+| **1** | RED | OVERSPEED |
+| **2** | GREEN | UNDERSPEED |
+| **3** | YELLOW | OVERSPEED |
+| **4** | BLUE | OVERSPEED |
+| **5** | MAGENTA | OVERSPEED |
+| **6** | CYAN | OVERSPEED |
+| **7** | WHITE | OVERSPEED |
 
-Board responds on the same channel:
+> **Tip:** Use color **1** (red) for overspeed, **2** (green) for underspeed – matches PDF behaviour.
 
-```
-45 0
-```
-
-(speed, then limit)
-
-### Test sequence (speed)
-
-```
-SPEED,65,0
-SPEED,40,1
-SPEED,999,0
-```
-
----
-
-## 8. TEXT Commands
-
-### 8.1 VSDS PDF protocol (recommended for PDF compliance)
-
-#### Show text
+### Examples – copy and edit the speed or color
 
 ```
-|T|x-y|text|color|font|1|0|
+|T|0-0|65|1|7|1|0|     → 65 km/h, RED, OVERSPEED
+|T|0-0|65|2|7|1|0|     → 65 km/h, GREEN, UNDERSPEED
+|T|0-0|120|1|7|1|0|    → 120 km/h, RED, OVERSPEED
+|T|0-0|45|3|7|1|0|     → 45 km/h, YELLOW, OVERSPEED
+|T|0-0|8|2|7|1|0|      → 8 km/h, GREEN, UNDERSPEED
 ```
-
-| Field | Description |
-|-------|-------------|
-| T | Text command |
-| x-y | Position (e.g. `0-0` = x=0, y=0) |
-| text | String to print |
-| color | 1–7 (see color table below) |
-| font | Font size 1–34 |
-| 1 | Text effect (fixed = 1) |
-| 0 | Reserved (fixed = 0) |
 
 **Reply:** `OK` or `ERR`
 
-#### PDF color table
+---
 
-| Code | Color |
-|------|-------|
-| 1 | RED |
-| 2 | GREEN |
-| 3 | YELLOW |
-| 4 | BLUE |
-| 5 | MAGENTA |
-| 6 | CYAN |
-| 7 | WHITE |
+## 8. CLEAR Commands
 
-#### PDF text examples
-
-```
-|T|0-0|99|1|7|1|0|
-```
-Show **99** in red at top-left, font size 7.
-
-```
-|T|0-40|HELLO|2|2|1|0|
-```
-Show **HELLO** in green at (0,40), font size 2.
-
-```
-|T|10-50|TEST|4|12|1|0|
-```
-Show **TEST** in blue at (10,50), font size 12.
-
-**Note:** Single digit 0–9 auto-shifts X by +15 pixels (per PDF).
-
-#### Clear text (PDF)
-
-```
-|C|0-40|HELLO|1|2|1|0|
-```
-Erases **HELLO** at (0,40) using font 2.
-
-#### Full screen clear (PDF)
+### 8.1 Full display clear
 
 ```
 |C|0-0|CLEAR|0|0|1|0|
 ```
-Clears entire display. **Do not change** the `CLEAR|0|0|1|0` part.
+
+Do **not** change `CLEAR|0|0|1|0` – PDF requires these exact values.
+
+### 8.2 Clear speed screen
+
+Use the **same speed and color** as when you showed it:
+
+```
+|C|0-0|65|1|7|1|0|
+```
+
+Clears the speed display (same fields as `|T|` except command is `C`).
+
+### Clear command fields
+
+| Field | Full clear | Speed clear |
+|-------|------------|-------------|
+| Command | `C` | `C` |
+| Position | `0-0` | `0-0` |
+| Text | `CLEAR` | `<speed>` (same as shown) |
+| Color | `0` | `<color>` (same as shown) |
+| Font | `0` | `7` |
+| Effect | `1` | `1` |
+| Reserve | `0` | `0` |
+
+**Reply:** `OK` or `ERR`
 
 ---
 
-### 8.2 Legacy comma TEXT
+## 9. IP & Port Commands (EEPROM)
 
-```
-TEXT,x,y,message,color,fontSize
-```
+Settings are **saved to EEPROM** and loaded on every boot.
 
-**Legacy color table** (different from PDF):
-
-| Code | Color |
-|------|-------|
-| 1 | BLACK |
-| 2 | BLUE |
-| 3 | RED |
-| 4 | GREEN |
-| 5 | CYAN |
-| 6 | MAGENTA |
-| 7 | YELLOW |
-| 8 | WHITE |
-| 9 | ORANGE |
-
-#### Examples
-
-```
-TEXT,10,50,HELLO,3,12
-```
-Red **HELLO** at (10,50), font 12.
-
-```
-TEXT,0,0,WELCOME,8,7
-```
-White **WELCOME** at top-left, font 7.
-
----
-
-## 9. Other Legacy Commands
-
-| Command | Format | Action |
-|---------|--------|--------|
-| Clear region | `CLEAR,x1,y1,x2,y2` | Black rectangle |
-| Brightness | `LUMEN,value` | 0–255 brightness |
-| Temperature | `TEMP` | Returns chip temperature |
-| Set IP | `SET,a,b,c,d` | Saves IP to EEPROM, reboots |
-| Set port | `SETS,port` | Saves TCP port to EEPROM, reboots |
-| Alive | (internal) | `START,ALIVE,...` heartbeat string |
-
-### Configuration examples
+### Change IP address
 
 ```
 SET,192,168,0,7
+```
+
+| Part | Meaning | Example to change |
+|------|---------|-------------------|
+| `SET` | Set IP command | Fixed |
+| 1st number | IP octet 1 | `192` |
+| 2nd number | IP octet 2 | `168` |
+| 3rd number | IP octet 3 | `0` |
+| 4th number | IP octet 4 | `7` → change to `100` for `192.168.0.100` |
+
+**Example – set IP to 192.168.0.100:**
+
+```
+SET,192,168,0,100
+```
+
+Reply: `OK` → board reboots → connect to new IP.
+
+### Change TCP port
+
+```
 SETS,23
 ```
 
-### Clear region example
+Change `23` to any port (e.g. `5023`):
 
 ```
-CLEAR,0,0,128,32
+SETS,5023
 ```
+
+Reply: `OK` → board reboots → connect on new port.
+
+### EEPROM layout (reference)
+
+| EEPROM address | Stores |
+|----------------|--------|
+| 0–3 | IP address (4 bytes) |
+| 5 | TCP port |
 
 ---
 
 ## 10. Step-by-Step First Test
 
-### Test 1 – Confirm boot
+### Test 1 – Boot check
 
 1. Power Pico + W5500 + panel.
-2. Open USB Serial Monitor @ 115200.
-3. Verify: `My IP:192.168.0.7` and heartbeat LED blinking.
+2. USB Serial Monitor @ 115200.
+3. Confirm: `My IP:192.168.0.7`, `PORT:23`, heartbeat LED blinking.
 
-### Test 2 – Speed on Ethernet
+### Test 2 – Speed on W5500
 
-1. Set PC IP to `192.168.0.100` (same subnet).
-2. Connect TCP to `192.168.0.7:23`.
-3. Send: `SPEED,55,0`
-4. Display should show **55** red + **OVERSPEED**.
+1. PC on same subnet (e.g. `192.168.0.100`).
+2. TCP connect to `192.168.0.7:23`.
+3. Send: `|T|0-0|55|1|7|1|0|`
+4. Display: **55** red + **OVERSPEED**, reply: `OK`
 
-### Test 3 – Text on Ethernet (PDF format)
+### Test 3 – Color change
 
-1. Same TCP connection.
-2. Send: `|T|0-0|TEST|1|7|1|0|`
-3. Reply: `OK`
-4. Display shows **TEST** in red.
+```
+|T|0-0|55|2|7|1|0|
+```
+
+Display: **55** green + **UNDERSPEED**
 
 ### Test 4 – Full clear
 
@@ -360,10 +306,19 @@ CLEAR,0,0,128,32
 |C|0-0|CLEAR|0|0|1|0|
 ```
 
+Display clears, reply: `OK`
+
 ### Test 5 – USR-K5 serial
 
-1. Send same commands through Serial1 @ 115200.
-2. Same results; replies on serial.
+Send the same commands @ **115200** on Serial1. Same display, reply on serial.
+
+### Test 6 – Change IP
+
+```
+SET,192,168,0,50
+```
+
+Reconnect to `192.168.0.50:23` after reboot.
 
 ---
 
@@ -371,11 +326,11 @@ CLEAR,0,0,128,32
 
 Hold **GPIO 27 (HARDRST)** **LOW for 10 seconds**:
 
-- IP reset to **192.168.0.7**
-- Port reset to default (**23**)
+- IP → `192.168.0.7`
+- Port → `23` (default)
 - Board reboots
 
-Or send (if you can still connect on old IP):
+Or send (if still reachable):
 
 ```
 SET,192,168,0,7
@@ -388,38 +343,51 @@ SETS,23
 
 | Problem | Check |
 |---------|-------|
-| No IP on serial | W5500 wiring, RST on GPIO 24, 3.3V power |
-| Cannot connect TCP | PC on 192.168.0.x subnet, firewall, correct port |
-| USR-K5 no response | TX/RX not swapped, 115200 baud, common GND |
-| Command ignored | End with Enter; check `\|` vs `,` format |
-| PDF text wrong color | Use PDF color table (1=RED), not legacy table |
-| SPEED no OK reply | Legacy speed returns `speed limit` not `OK` – this is normal |
-| Old IP after flash | EEPROM still has old IP – hard reset or `SET,...` |
-| Display blank after TEXT | Try `SPEED,...` or check font/color values |
+| No IP on serial | W5500 wiring, RST GPIO 24, 3.3V power |
+| Cannot connect TCP | PC on same subnet, firewall, correct IP/port |
+| USR-K5 no response | TX/RX swapped?, 115200 baud, common GND |
+| Command ignored | End with Enter; command must start with `\|` or `SET`/`SETS` |
+| Reply `ERR` on `\|T\|` | Use `0-0`, font `7`, color 1–7, numeric speed |
+| Wrong color | Use PDF color table (1=RED, 2=GREEN) |
+| Old IP after flash | EEPROM keeps old IP – factory reset or `SET,...` |
+| Display blank | Send valid `\|T\|` command; check panel power |
 
 ---
 
 ## 13. Quick Reference Card
 
+Copy this block – edit speed, color, IP, or port as needed:
+
 ```
-─── SPEED (legacy, comma) ───
-SPEED,65,0          → 65 km/h OVERSPEED (red)
-SPEED,65,1          → 65 km/h UNDERSPEED (green)
+─── SHOW SPEED (change speed & color) ───
+|T|0-0|65|1|7|1|0|          → 65 red OVERSPEED
+|T|0-0|65|2|7|1|0|          → 65 green UNDERSPEED
+|T|0-0|120|1|7|1|0|         → 120 red OVERSPEED
 
-─── TEXT (PDF, pipe) ───
-|T|0-0|99|1|7|1|0|              → text, red, font 7
-|T|0-40|HELLO|2|2|1|0|          → HELLO, green, font 2
-|C|0-0|CLEAR|0|0|1|0|           → clear screen
-|C|0-40|HELLO|1|2|1|0|          → erase HELLO
+─── CLEAR ───
+|C|0-0|65|1|7|1|0|          → clear speed screen
+|C|0-0|CLEAR|0|0|1|0|       → clear full display
 
-─── TEXT (legacy, comma) ───
-TEXT,10,50,HELLO,3,12          → red text, font 12
+─── IP & PORT (saved to EEPROM) ───
+SET,192,168,0,7             → set IP, reboot
+SETS,23                     → set port, reboot
 
-─── Network ───
-IP:   192.168.0.7
-Port: 23
-UART: 115200, TX=20, RX=21
+─── CONNECTION ───
+W5500:  192.168.0.7 : 23
+USR-K5: 115200 baud, TX=GPIO20, RX=GPIO21
 ```
+
+### Color quick pick
+
+| Want | Use color code |
+|------|----------------|
+| Red overspeed | `1` |
+| Green underspeed | `2` |
+| Yellow | `3` |
+| Blue | `4` |
+| Magenta | `5` |
+| Cyan | `6` |
+| White | `7` |
 
 ---
 
@@ -427,11 +395,10 @@ UART: 115200, TX=20, RX=21
 
 | File | Purpose |
 |------|---------|
-| `vasd.ino` | Main firmware |
-| `config.h` | Pins, IP, panel, colors |
-| `VSDS PROTOCOL_AIPL.pdf` | Official VSDS pipe command spec |
-| `fonts/` | Display font data |
-| `bitmap.h` | Image bitmap data |
+| `vasd.ino` | Main firmware – commands & display |
+| `config.h` | Default IP, port, pins, panel, colors |
+| `VSDS PROTOCOL_AIPL.pdf` | Official VSDS command spec |
+| `fonts/` | Display fonts (headline + speed digits) |
 
 ---
 
