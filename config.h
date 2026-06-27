@@ -54,25 +54,50 @@ uint8_t RGBPinsList[] = { 11, 0, 1, 2, 3, 4, 5 }; // CLK, R0, G0, B0, R1, G1, B1
 #define WHITE    0xFFFF
 #define ORANGE   0xFCBC
 
+/*
+   VSDS PDF color codes (Artistic Infratech protocol)
+   1=RED 2=GREEN 3=YELLOW 4=BLUE 5=MAGENTA 6=CYAN 7=WHITE
+*/
+#define VSDS_COLOR_RED     1
+#define VSDS_COLOR_GREEN   2
+#define VSDS_COLOR_YELLOW  3
+#define VSDS_COLOR_BLUE    4
+#define VSDS_COLOR_MAGENTA 5
+#define VSDS_COLOR_CYAN    6
+#define VSDS_COLOR_WHITE   7
+
 #define ETHERNET_SS_PIN 17
+#define W5500_RST_PIN 24
+#define W5500_SCK_PIN 18
+#define W5500_MOSI_PIN 19
+#define W5500_MISO_PIN 16
 #define HeartBeatLed 22
 #define HARDRST 27
+
 /*
-   ETHERNET CONFIGS
+   USR-K5 UART (Serial1 on Pico)
+   TX = GPIO 20, RX = GPIO 21
+*/
+#define USR_K5_TX_PIN 20
+#define USR_K5_RX_PIN 21
+#define USR_K5_BAUDRATE 115200
+
+/*
+   ETHERNET CONFIGS (W5500)
 */
 
-#define SERVER_PORT 1000
+#define SERVER_PORT 23
 byte SERVER_MAC[] = {
   0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED
 };
-const int ip_array[4] = {192, 168, 2, 125};
+const int ip_array[4] = {192, 168, 0, 7};
 
 /*
    SERIAL CONFIGS
 */
 #define SERIAL_BAUDRATE 115200
 #define SERIAL_INTERFACE Serial
-#define COM_PORT Serial
+#define COM_PORT Serial1
 
 
 
